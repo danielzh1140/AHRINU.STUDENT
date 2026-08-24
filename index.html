@@ -219,6 +219,14 @@
                                 const incomingStore = cloudData.mockDataStore;
                                 incomingStore.liveContent ||= {};
                                 incomingStore.studentAiEnabled ||= {};
+                                Object.entries(cloudData.classControls || {}).forEach(([className, controls]) => {
+                                    if (Object.prototype.hasOwnProperty.call(controls, 'liveContent')) {
+                                        incomingStore.liveContent[className] = controls.liveContent;
+                                    }
+                                    if (Object.prototype.hasOwnProperty.call(controls, 'aiEnabled')) {
+                                        incomingStore.studentAiEnabled[className] = controls.aiEnabled;
+                                    }
+                                });
                                 const activeEl = document.activeElement;
                                 if (activeEl && activeEl.id === 'teacher-live-editor' && this.currentUser && this.currentView === 'teacher') {
                                     incomingStore.liveContent[this.currentUser.className] = mockDataStore.liveContent[this.currentUser.className];
@@ -261,6 +269,13 @@
                 if (!this.currentUser) return;
                 if (window.cloudStorage && typeof window.cloudStorage.saveData === 'function') {
                     window.cloudStorage.saveData({ mockDataStore: mockDataStore });
+                }
+            },
+
+            syncClassControl(cls, controls) {
+                if (!cls || !this.currentUser) return;
+                if (window.cloudStorage && typeof window.cloudStorage.saveData === 'function') {
+                    window.cloudStorage.saveData({ classControls: { [cls]: controls } });
                 }
             },
 
@@ -1032,7 +1047,7 @@
                 mockDataStore.studentAiEnabled ||= {};
                 const aiEnabled = !this.isAiEnabledForStudents(cls);
                 mockDataStore.studentAiEnabled[cls] = aiEnabled;
-                this.syncToCloud();
+                this.syncClassControl(cls, { aiEnabled });
                 this.showToast(aiEnabled ? 'גישה לבינה מלאכותית הופעלה לתלמידים' : 'גישה לבינה מלאכותית נחסמה לתלמידים', aiEnabled ? 'success' : 'error');
                 this.render();
             },
@@ -1069,7 +1084,7 @@
                                 <button onclick="appState.generateLessonDraftAI()" class="px-3 h-8 rounded bg-indigo-50 border border-indigo-200 text-indigo-700 font-bold text-sm flex items-center gap-2 hover:bg-indigo-100 transition"><i class="fas fa-magic"></i> נסח שיעור ב-AI</button>
                             </div>
                             <div class="flex-1 p-0 relative bg-amber-50/20 overflow-y-auto">
-                                <div id="teacher-live-editor" contenteditable="true" dir="rtl" class="rich-editor w-full h-full p-6 outline-none font-serif text-xl leading-loose text-slate-800 min-h-[300px]" placeholder="התחל לכתוב כאן..." oninput="appState.updateLiveContent(this.innerHTML)">${liveText}</div>
+                                <div id="teacher-live-editor" contenteditable="true" dir="rtl" class="rich-editor w-full h-full p-6 outline-none font-serif text-xl leading-loose text-slate-800 min-h-[300px]" placeholder="התחל לכתוב כאן..." oninput="appState.updateLiveContent(this.innerHTML)" onblur="appState.flushLiveContent()">${liveText}</div>
                             </div>
                         </div>
 
@@ -1362,11 +1377,23 @@
                 const cls = this.currentUser.className;
                 if(cls) {
                     mockDataStore.liveContent[cls] = sanitizeInput(htmlContent);
+                    if (!this.liveSyncTimer) {
+                        this.syncClassControl(cls, { liveContent: mockDataStore.liveContent[cls] });
+                        this.liveSyncTimer = setTimeout(() => {
+                            this.syncClassControl(cls, { liveContent: mockDataStore.liveContent[cls] });
+                            this.liveSyncTimer = null;
+                        }, 250);
+                    }
+                }
+            },
+
+            flushLiveContent() {
+                if (this.liveSyncTimer && this.currentUser?.className) {
                     clearTimeout(this.liveSyncTimer);
-                    this.liveSyncTimer = setTimeout(() => {
-                        this.syncToCloud();
-                        this.liveSyncTimer = null;
-                    }, 250);
+                    this.syncClassControl(this.currentUser.className, {
+                        liveContent: mockDataStore.liveContent[this.currentUser.className] || ''
+                    });
+                    this.liveSyncTimer = null;
                 }
             },
 
@@ -1685,19 +1712,19 @@
                             </div>
                         </div>
 
-                        <div class="bg-white rounded-2xl shadow-sm border border-slate-200 flex flex-col overflow-hidden h-[400px] md:h-full">
-                            <div class="bg-teal-600 p-4 border-b flex items-center gap-3 shrink-0">
+                        <div class="${aiEnabled ? 'bg-white border-slate-200' : 'bg-slate-100 border-slate-300'} rounded-2xl shadow-sm border flex flex-col overflow-hidden h-[400px] md:h-full" aria-disabled="${!aiEnabled}">
+                            <div class="${aiEnabled ? 'bg-teal-600' : 'bg-slate-500'} p-4 border-b flex items-center gap-3 shrink-0">
                                 <div class="w-8 h-8 rounded-full bg-white/20 flex items-center justify-center text-white"><i class="fas fa-robot"></i></div>
-                                <h3 class="font-black text-white text-lg">סייע למידה (Gemini)</h3>
+                                <h3 class="font-black text-white text-lg">סייע למידה ${aiEnabled ? '(Gemini)' : '(כבוי)'}</h3>
                             </div>
                             <div class="p-4 bg-teal-50/50 flex-1 overflow-y-auto flex flex-col gap-4" id="student-tutor-chat">
                                 <div class="bg-white border border-teal-100 p-4 rounded-2xl text-sm text-slate-700 font-medium">
                                     ${aiEnabled ?
                                         `שלום ${this.currentUser.name}! אני כאן לעזור. שאל אותי כל שאלה על החומר שנלמד בלוח.` :
-                                        'הגישה לסייע נחסמה על ידי המורה.'}
+                                        '<i class="fas fa-lock text-slate-500 ml-2"></i> הגישה לסייע נחסמה על ידי המורה.'}
                                 </div>
                             </div>
-                            <div class="p-3 bg-white border-t border-slate-200 flex gap-2 shrink-0">
+                            ${aiEnabled ? `<div class="p-3 bg-white border-t border-slate-200 flex gap-2 shrink-0">
                                 <input type="text" id="tutor-input" class="flex-1 px-4 py-2.5 rounded-xl border border-slate-300 focus:border-teal-500 outline-none text-sm font-medium" placeholder="${aiEnabled ? 'שאל שאלה...' : 'סייע חסום'}" onkeypress="if(event.key === 'Enter') appState.askTutor()" ${!aiEnabled ? 'disabled' : ''}>
                                 <button onclick="appState.askTutor()" class="bg-teal-600 hover:bg-teal-700 text-white w-10 rounded-xl font-bold flex items-center justify-center disabled:opacity-50" ${!aiEnabled ? 'disabled' : ''}>
                                     <i class="fas fa-paper-plane"></i>
@@ -1705,7 +1732,7 @@
                                 <button onclick="appState.summarizeLessonAI()" class="bg-indigo-100 text-indigo-700 hover:bg-indigo-200 px-3 rounded-xl font-bold text-sm transition shrink-0" ${!aiEnabled ? 'disabled' : ''}>
                                     <i class="fas fa-bolt"></i> סכם לי
                                 </button>
-                            </div>
+                            </div>` : ''}
                         </div>
                     </div>
                 `;
