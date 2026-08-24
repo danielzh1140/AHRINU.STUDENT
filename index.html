@@ -122,6 +122,7 @@
             exams: { 'י״א': [] },
             grades: [],
             liveContent: {},
+            studentAiEnabled: {},
             archives: {},
             chat: []
         };
@@ -203,8 +204,8 @@
             teacherTab: 'live',
             chatSelectedUser: 'all',
             studentTab: 'live',
-            aiEnabledForStudents: true,
             adminTab: 'users',
+            liveSyncTimer: null,
 
             async init() {
                 try {
@@ -212,12 +213,39 @@
                         await window.cloudStorage.initAuth();
                         window.cloudStorage.listenData((cloudData) => {
                             if (cloudData && cloudData.mockDataStore) {
+                                const studentClass = this.currentUser?.className;
+                                const previousLiveContent = studentClass ? mockDataStore.liveContent?.[studentClass] || '' : '';
+                                const previousAiEnabled = studentClass ? this.isAiEnabledForStudents(studentClass) : true;
+                                const incomingStore = cloudData.mockDataStore;
+                                incomingStore.liveContent ||= {};
+                                incomingStore.studentAiEnabled ||= {};
                                 const activeEl = document.activeElement;
                                 if (activeEl && activeEl.id === 'teacher-live-editor' && this.currentUser && this.currentView === 'teacher') {
-                                    cloudData.mockDataStore.liveContent[this.currentUser.className] = mockDataStore.liveContent[this.currentUser.className];
+                                    incomingStore.liveContent[this.currentUser.className] = mockDataStore.liveContent[this.currentUser.className];
                                 }
-                                mockDataStore = cloudData.mockDataStore;
-                                this.updateDynamicUI();
+                                mockDataStore = incomingStore;
+
+                                const currentUserId = this.currentUser?.id;
+                                if (currentUserId) {
+                                    this.currentUser = mockDataStore.users.find(user => user.id === currentUserId) || this.currentUser;
+                                }
+
+                                const liveContentChanged = this.currentView === 'student' &&
+                                    studentClass &&
+                                    previousLiveContent !== (mockDataStore.liveContent[studentClass] || '');
+                                const aiSettingChanged = this.currentView === 'student' &&
+                                    studentClass &&
+                                    previousAiEnabled !== this.isAiEnabledForStudents(studentClass);
+
+                                if (aiSettingChanged) {
+                                    this.render();
+                                } else {
+                                    this.updateDynamicUI();
+                                }
+
+                                if (liveContentChanged && mockDataStore.liveContent[studentClass]) {
+                                    setTimeout(() => this.showFloatingBoard(), 0);
+                                }
                             }
                         });
                     }
@@ -994,23 +1022,33 @@
                 this.render();
             },
 
+            isAiEnabledForStudents(cls = this.currentUser?.className) {
+                return !cls || mockDataStore.studentAiEnabled?.[cls] !== false;
+            },
+
             toggleAiForStudents() {
-                this.aiEnabledForStudents = !this.aiEnabledForStudents;
-                this.showToast(this.aiEnabledForStudents ? 'גישה לבינה מלאכותית הופעלה לתלמידים' : 'גישה לבינה מלאכותית נחסמה לתלמידים', this.aiEnabledForStudents ? 'success' : 'error');
+                if (this.currentUser?.role !== 'teacher' || !this.currentUser.className) return;
+                const cls = this.currentUser.className;
+                mockDataStore.studentAiEnabled ||= {};
+                const aiEnabled = !this.isAiEnabledForStudents(cls);
+                mockDataStore.studentAiEnabled[cls] = aiEnabled;
+                this.syncToCloud();
+                this.showToast(aiEnabled ? 'גישה לבינה מלאכותית הופעלה לתלמידים' : 'גישה לבינה מלאכותית נחסמה לתלמידים', aiEnabled ? 'success' : 'error');
                 this.render();
             },
 
             renderTeacherLiveTab(cls) {
                 const liveText = mockDataStore.liveContent[cls] || '';
                 const classArchives = mockDataStore.archives[cls] || [];
+                const aiEnabled = this.isAiEnabledForStudents(cls);
                 return `
                     <div class="grid grid-cols-1 lg:grid-cols-3 gap-4 h-full">
                         <div class="lg:col-span-2 bg-white rounded-2xl shadow-sm border border-slate-200 flex flex-col overflow-hidden h-[500px] lg:h-full">
                             <div class="bg-slate-800 p-3 border-b flex justify-between items-center shrink-0">
                                 <h3 class="font-black text-white flex items-center gap-2"><i class="fas fa-broadcast-tower text-red-400 animate-pulse"></i> שידור חי: כיתה ${cls}</h3>
                                 <div class="flex gap-2">
-                                    <button onclick="appState.toggleAiForStudents()" class="${this.aiEnabledForStudents ? 'bg-emerald-500 hover:bg-emerald-600' : 'bg-rose-500 hover:bg-rose-600'} text-white px-3 py-1.5 rounded-lg text-sm font-bold transition flex items-center gap-2">
-                                        <i class="fas ${this.aiEnabledForStudents ? 'fa-toggle-on' : 'fa-toggle-off'}"></i> סייע AI: ${this.aiEnabledForStudents ? 'פעיל' : 'כבוי'}
+                                    <button onclick="appState.toggleAiForStudents()" class="${aiEnabled ? 'bg-emerald-500 hover:bg-emerald-600' : 'bg-rose-500 hover:bg-rose-600'} text-white px-3 py-1.5 rounded-lg text-sm font-bold transition flex items-center gap-2">
+                                        <i class="fas ${aiEnabled ? 'fa-toggle-on' : 'fa-toggle-off'}"></i> סייע AI: ${aiEnabled ? 'פעיל' : 'כבוי'}
                                     </button>
                                     <button onclick="appState.viewArchive()" class="bg-slate-600 hover:bg-slate-500 text-white px-3 py-1.5 rounded-lg text-sm font-bold transition flex items-center gap-2">
                                         <i class="fas fa-folder-open"></i> ארכיון
@@ -1324,7 +1362,11 @@
                 const cls = this.currentUser.className;
                 if(cls) {
                     mockDataStore.liveContent[cls] = sanitizeInput(htmlContent);
-                    this.syncToCloud();
+                    clearTimeout(this.liveSyncTimer);
+                    this.liveSyncTimer = setTimeout(() => {
+                        this.syncToCloud();
+                        this.liveSyncTimer = null;
+                    }, 250);
                 }
             },
 
@@ -1607,6 +1649,7 @@
 
             renderStudentLiveTab(cls) {
                 const myNotebooks = this.currentUser.notebooks || [];
+                const aiEnabled = this.isAiEnabledForStudents(cls);
                 return `
                     <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 h-full">
                         <div class="lg:col-span-2 flex flex-col gap-4 h-[600px] md:h-full">
@@ -1649,17 +1692,17 @@
                             </div>
                             <div class="p-4 bg-teal-50/50 flex-1 overflow-y-auto flex flex-col gap-4" id="student-tutor-chat">
                                 <div class="bg-white border border-teal-100 p-4 rounded-2xl text-sm text-slate-700 font-medium">
-                                    ${this.aiEnabledForStudents ?
+                                    ${aiEnabled ?
                                         `שלום ${this.currentUser.name}! אני כאן לעזור. שאל אותי כל שאלה על החומר שנלמד בלוח.` :
                                         'הגישה לסייע נחסמה על ידי המורה.'}
                                 </div>
                             </div>
                             <div class="p-3 bg-white border-t border-slate-200 flex gap-2 shrink-0">
-                                <input type="text" id="tutor-input" class="flex-1 px-4 py-2.5 rounded-xl border border-slate-300 focus:border-teal-500 outline-none text-sm font-medium" placeholder="${this.aiEnabledForStudents ? 'שאל שאלה...' : 'סייע חסום'}" onkeypress="if(event.key === 'Enter') appState.askTutor()" ${!this.aiEnabledForStudents ? 'disabled' : ''}>
-                                <button onclick="appState.askTutor()" class="bg-teal-600 hover:bg-teal-700 text-white w-10 rounded-xl font-bold flex items-center justify-center disabled:opacity-50" ${!this.aiEnabledForStudents ? 'disabled' : ''}>
+                                <input type="text" id="tutor-input" class="flex-1 px-4 py-2.5 rounded-xl border border-slate-300 focus:border-teal-500 outline-none text-sm font-medium" placeholder="${aiEnabled ? 'שאל שאלה...' : 'סייע חסום'}" onkeypress="if(event.key === 'Enter') appState.askTutor()" ${!aiEnabled ? 'disabled' : ''}>
+                                <button onclick="appState.askTutor()" class="bg-teal-600 hover:bg-teal-700 text-white w-10 rounded-xl font-bold flex items-center justify-center disabled:opacity-50" ${!aiEnabled ? 'disabled' : ''}>
                                     <i class="fas fa-paper-plane"></i>
                                 </button>
-                                <button onclick="appState.summarizeLessonAI()" class="bg-indigo-100 text-indigo-700 hover:bg-indigo-200 px-3 rounded-xl font-bold text-sm transition shrink-0" ${!this.aiEnabledForStudents ? 'disabled' : ''}>
+                                <button onclick="appState.summarizeLessonAI()" class="bg-indigo-100 text-indigo-700 hover:bg-indigo-200 px-3 rounded-xl font-bold text-sm transition shrink-0" ${!aiEnabled ? 'disabled' : ''}>
                                     <i class="fas fa-bolt"></i> סכם לי
                                 </button>
                             </div>
@@ -1841,6 +1884,7 @@
             },
 
             async summarizeLessonAI() {
+                if (!this.isAiEnabledForStudents()) return;
                 const cls = this.currentUser.className;
                 const liveText = mockDataStore.liveContent[cls] || '';
 
@@ -1877,7 +1921,7 @@
             },
 
             async askTutor() {
-                if(!this.aiEnabledForStudents) return;
+                if (!this.isAiEnabledForStudents()) return;
 
                 const input = document.getElementById('tutor-input');
                 const chat = document.getElementById('student-tutor-chat');
