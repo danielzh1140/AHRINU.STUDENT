@@ -256,7 +256,30 @@
                                 const previousChatLength = Array.isArray(mockDataStore.chat) ? mockDataStore.chat.length : 0;
                                 const activeEl = document.activeElement;
                                 if (activeEl && activeEl.id === 'teacher-live-editor' && this.currentUser && this.currentView === 'teacher') {
-                                    cloudData.mockDataStore.liveContent[this.currentUser.className] = mockDataStore.liveContent[this.currentUser.className];
+                                    incomingStore.liveContent[this.currentUser.className] = mockDataStore.liveContent[this.currentUser.className];
+                                }
+                                mockDataStore = incomingStore;
+
+                                const currentUserId = this.currentUser?.id;
+                                if (currentUserId) {
+                                    this.currentUser = mockDataStore.users.find(user => user.id === currentUserId) || this.currentUser;
+                                }
+
+                                const liveContentChanged = this.currentView === 'student' &&
+                                    studentClass &&
+                                    previousLiveContent !== (mockDataStore.liveContent[studentClass] || '');
+                                const aiSettingChanged = this.currentView === 'student' &&
+                                    studentClass &&
+                                    previousAiEnabled !== this.isAiEnabledForStudents(studentClass);
+
+                                if (aiSettingChanged) {
+                                    this.render();
+                                } else {
+                                    this.updateDynamicUI();
+                                }
+
+                                if (liveContentChanged && mockDataStore.liveContent[studentClass]) {
+                                    setTimeout(() => this.showFloatingBoard(), 0);
                                 }
                                 mockDataStore = cloudData.mockDataStore;
                                 const chatGrew = Array.isArray(mockDataStore.chat) && mockDataStore.chat.length > previousChatLength;
