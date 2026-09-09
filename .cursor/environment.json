@@ -1,0 +1,15 @@
+{
+  "name": "AHRINU.STUDENT",
+  "install": "npm ci && npm run build && npm run verify",
+  "terminals": [
+    {
+      "name": "static-server",
+      "command": "python3 -m http.server 8000",
+      "description": "Serves the repository root over HTTP. Open the standalone LMS at http://localhost:8000/index.html (all asset paths are relative, matching GitHub Pages)."
+    }
+  ],
+  "ports": [
+    { "name": "web", "port": 8000 }
+  ],
+  "chromeExecutablePath": "/usr/bin/google-chrome-stable"
+}
