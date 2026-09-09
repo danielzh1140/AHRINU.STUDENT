@@ -31,3 +31,7 @@ in `assets/THIRD_PARTY_NOTICES.txt` and `assets/FIREBASE_NOTICE.txt`.
 
 Serve the repository root over HTTP for local testing. All static asset paths
 are relative so the same files work under the GitHub Pages repository subpath.
+
+## Latest sync
+
+Synced from `danielzh1140/learning-games` commit `aee3556e2b1001ade2efb737a899bc02b97abfaf` on 2026-09-02.
